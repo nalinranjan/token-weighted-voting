@@ -1,6 +1,6 @@
 pragma solidity ^0.4.11;
 
-// 0xff1e6f10cded258f34d288a1ff93740287cc8a6b
+// 0x2efbbc1399f79e405a62ecd38928e8b70eee7c14
 
 contract PersistentStorage {
 

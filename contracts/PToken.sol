@@ -1,21 +1,28 @@
 /*
-You should inherit from StandardToken or, for a token like you would want to
-deploy in something like Mist, see HumanStandardToken.sol.
-(This implements ONLY the standard functions and NOTHING else.
-If you deploy this, you won't have anything useful.)
-
 Implements ERC 20 Token standard: https://github.com/ethereum/EIPs/issues/20
 .*/
 pragma solidity ^0.4.8;
 
-// 0x16063c97f4183b183d936206a39ceb84cd839131
+// 0x710a257a58747569215c81972de0c7c0c187b23d
+
+/*
+    Balance
+
+    "Balance", address                          uint
+    "OnHold", address                           uint
+    "Allowed", ownerAddress, spenderAddress     uint
+*/
 
 import "./Token.sol";
+import "./PersistentStorage.sol";
 
 contract PToken is Token {
 
-    function PToken(uint _initialAmount) {
-        balances[msg.sender] = _initialAmount;
+    address public storageAddress;
+
+    function PToken(uint _initialAmount, address _storage) {
+        storageAddress = _storage;
+        PersistentStorage(storageAddress).setUintValue(sha3("Balance", msg.sender), _initialAmount);
         totalSupply = _initialAmount;
     }
 
@@ -24,9 +31,20 @@ contract PToken is Token {
         //If your token leaves out totalSupply and can issue more tokens as time goes on, you need to check if it doesn't wrap.
         //Replace the if with this one instead.
         //if (balances[msg.sender] >= _value && balances[_to] + _value > balances[_to]) {
-        if (balances[msg.sender] >= _value && _value > 0) {
-            balances[msg.sender] -= _value;
-            balances[_to] += _value;
+
+        if (isLocked(msg.sender)) { return false; }
+
+        var store = PersistentStorage(storageAddress);
+        var fromBalance = balanceOf(msg.sender);
+        var toBalance = balanceOf(_to);
+
+        if (fromBalance >= _value && _value > 0) {
+            store.setUintValue(sha3("Balance", msg.sender), fromBalance - _value);
+            if (isLocked(_to)) { 
+                addOnHoldBalance(_to, _value); 
+            } else { 
+                store.setUintValue(sha3("Balance", _to), toBalance + _value); 
+            }
             Transfer(msg.sender, _to, _value);
             return true;
         } else { return false; }
@@ -35,29 +53,72 @@ contract PToken is Token {
     function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
         //same as above. Replace this line with the following if you want to protect against wrapping uints.
         //if (balances[_from] >= _value && allowed[_from][msg.sender] >= _value && balances[_to] + _value > balances[_to]) {
-        if (balances[_from] >= _value && allowed[_from][msg.sender] >= _value && _value > 0) {
-            balances[_to] += _value;
-            balances[_from] -= _value;
-            allowed[_from][msg.sender] -= _value;
+
+        if (isLocked(msg.sender)) { return false; }
+
+        var store = PersistentStorage(storageAddress);
+        var fromBalance = balanceOf(_from);
+        var toBalance = balanceOf(_to);
+        var allowed = allowance(_from, msg.sender);
+
+        if (fromBalance >= _value && allowed >= _value && _value > 0) {
+            store.setUintValue(sha3("Balance", _from), fromBalance - _value);
+            if (isLocked(_to)) { 
+                addOnHoldBalance(_to, _value); 
+            } else { 
+                store.setUintValue(sha3("Balance", _to), toBalance + _value); 
+            }
+            store.setUintValue(sha3("Allowed", _from, msg.sender), allowed - _value);
             Transfer(_from, _to, _value);
             return true;
         } else { return false; }
     }
 
     function balanceOf(address _owner) constant returns (uint256 balance) {
-        return balances[_owner];
+        return PersistentStorage(storageAddress).getUintValue(sha3("Balance", _owner));
+    }
+
+    function onHoldBalanceOf(address _owner) constant returns (uint256 balance) {
+        return PersistentStorage(storageAddress).getUintValue(sha3("OnHold", _owner));
+    }
+
+    function addOnHoldBalance(address _owner, uint256 _value) returns (bool success) {
+        var newBalance = onHoldBalanceOf(_owner) + _value;
+        PersistentStorage(storageAddress).setUintValue(sha3("OnHold", _owner), newBalance);
+        return true;
+    }
+
+    function releaseHold(address _owner) returns (bool success) {
+        var store = PersistentStorage(storageAddress);
+        var onHoldBalance = onHoldBalanceOf(_owner);
+
+        if (onHoldBalance > 0) {
+            var newBalance = balanceOf(_owner) + onHoldBalance;
+            store.setUintValue(sha3("OnHold", _owner), uint256(0));
+            store.setUintValue(sha3("Balance", _owner), newBalance);
+        }
+
+        return true;
     }
 
     function approve(address _spender, uint256 _value) returns (bool success) {
-        allowed[msg.sender][_spender] = _value;
+        var newAllowed = allowance(msg.sender, _spender) + _value;
+        PersistentStorage(storageAddress).setUintValue(sha3("Allowed", msg.sender, _spender), newAllowed);
         Approval(msg.sender, _spender, _value);
         return true;
     }
 
     function allowance(address _owner, address _spender) constant returns (uint256 remaining) {
-      return allowed[_owner][_spender];
+      return PersistentStorage(storageAddress).getUintValue(sha3("Allowed", _owner, _spender));
     }
 
-    mapping (address => uint256) balances;
-    mapping (address => mapping (address => uint256)) allowed;
+    function isLocked(address _owner) constant returns (bool locked) {
+        var firstCloseTime = PersistentStorage(storageAddress).getUintValue(sha3("Vote", _owner, uint256(0), "nextTimestamp"));
+
+        if (firstCloseTime == 0 || firstCloseTime > now) { return false; }
+        return true;
+    }
+
+    // mapping (address => uint256) balances;
+    // mapping (address => mapping (address => uint256)) allowed;
 }

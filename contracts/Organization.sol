@@ -3,7 +3,7 @@ pragma solidity ^0.4.11;
 import "./PersistentStorage.sol";
 import "./PToken.sol";
 
-// 0xd99a7e8a6c2fc89d341b98c923b91db69e44c453
+// 0x8bfbd2dcd4ab965b9a4e9edfdb7c13703b9df559
 
 /*    
     Poll
@@ -134,7 +134,7 @@ contract Organization {
 
     function revealVote(uint pollId, uint optionIdx, bytes32 salt) 
     checkPollStatus(pollId, 2) 
-    returns (bool success) {
+    returns (bool) {
         var store = PersistentStorage(storageAddress);
 
         // Verify that poll is closed
@@ -148,16 +148,37 @@ contract Organization {
             throw;
         }
 
-        // TODO: Get Balance
-        var votes = store.getUintValue(sha3("Poll", pollId, optionIdx, "votes")) + 1;
+        var votes = store.getUintValue(sha3("Poll", pollId, optionIdx, "votes")) + PToken(ptokenAddress).balanceOf(msg.sender);
         var leadingOption = store.getUintValue(sha3("Poll", pollId, "leadingOption"));
         if (votes > store.getUintValue(sha3("Poll", pollId, leadingOption, "votes"))) {
-            store.setUintValue(sha3("Poll", pollId, "leadingOption"), votes);
+            store.setUintValue(sha3("Poll", pollId, "leadingOption"), optionIdx);
         }
         store.setUintValue(sha3("Poll", pollId, optionIdx, "votes"), votes);
 
-        // TODO: Release Funds
+        //Remove Vote
+        removeVote(pollId, closeTime);
+
+        if (!PToken(ptokenAddress).isLocked(msg.sender)) {
+            PToken(ptokenAddress).releaseHold(msg.sender);
+        }
+
         return true;
+    }
+
+    function removeVote(uint pollId, uint closeTime) internal {
+        var store = PersistentStorage(storageAddress);
+
+        var prevPollId = store.getUintValue(sha3("Vote", msg.sender, closeTime, pollId, "prevPollId"));
+        var nextPollId = store.getUintValue(sha3("Vote", msg.sender, closeTime, pollId, "nextPollId"));
+        store.setUintValue(sha3("Vote", msg.sender, closeTime, prevPollId, "nextPollId"), nextPollId);
+        store.setUintValue(sha3("Vote", msg.sender, closeTime, nextPollId, "prevPollId"), prevPollId);
+
+        if (store.getUintValue(sha3("Vote", msg.sender, closeTime, uint(0), "nextPollId")) == uint(0)) {
+            var prevTimestamp = store.getUintValue(sha3("Vote", msg.sender, closeTime, "prevTimestamp"));
+            var nextTimestamp = store.getUintValue(sha3("Vote", msg.sender, closeTime, "nextTimestamp"));
+            store.setUintValue(sha3("Vote", msg.sender, prevTimestamp, "nextTimestamp"), nextTimestamp);
+            store.setUintValue(sha3("Vote", msg.sender, nextTimestamp, "prevTimestamp"), prevTimestamp);
+        }
     }
 
     function getResult(uint pollId) constant checkPollStatus(pollId, 3) returns (uint optionIdx, uint votes) {
