@@ -3,7 +3,7 @@ pragma solidity ^0.4.11;
 import "./PersistentStorage.sol";
 import "./PToken.sol";
 
-// 0x8bfbd2dcd4ab965b9a4e9edfdb7c13703b9df559
+// 0x858770b41f60eea2851501a7fc77bbdb530c1757
 
 /*    
     Poll
@@ -132,17 +132,13 @@ contract Organization {
         return true;
     }
 
-    function revealVote(uint pollId, uint optionIdx, bytes32 salt) 
-    checkPollStatus(pollId, 2) 
-    returns (bool) {
+    function revealVote(uint pollId, uint optionIdx, bytes32 salt) returns (bool) {
         var store = PersistentStorage(storageAddress);
+        var status = store.getUintValue(sha3("Poll", pollId, "status"));
 
         // Verify that poll is closed
-        if (store.getUintValue(sha3("Poll", pollId, "closeTime")) > now) {
-            return false;
-        }
-
         var closeTime = store.getUintValue(sha3("Poll", pollId, "closeTime"));
+        if (status < 2 || closeTime > now) { return false; }
 
         if (sha3(pollId, optionIdx, salt) != store.getBytes32Value(sha3("Vote", msg.sender, closeTime, pollId, "secret"))) {
             throw;
